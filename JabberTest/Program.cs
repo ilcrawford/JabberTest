@@ -86,9 +86,6 @@ namespace JabberTest
             logger.LogDebug($"Smtp Host {appConfig.SmtpHost}");
             logger.LogDebug($"Smtp port {appConfig.SmtpPort}");
 
-            return;
-
-
             var pipelineInitializerAction = new Action<IChannelPipeline, ISession>((pipeline, session) =>
             {
                 pipeline.AddFirst(new MyLoggingHandler(logger));
