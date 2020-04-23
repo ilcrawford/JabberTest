@@ -34,6 +34,7 @@ using System.IO;
 
 // TODO - capture new threads to email later.
 // TODO - Only respond on the first item for thread.
+// TODO - Get hosts and ports
 // DONE - moved magic valued to appsettings.json
 
 namespace JabberTest
