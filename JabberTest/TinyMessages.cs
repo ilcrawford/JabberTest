@@ -1,6 +1,6 @@
 ﻿using TinyMessenger;
 
-using Matrix.Xmpp.Client;
+using Matrix.Xmpp.Base;
 
 
 namespace JabberTest

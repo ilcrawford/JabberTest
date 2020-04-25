@@ -36,10 +36,11 @@ using Serilog;
 using TinyMessenger;
 
 
-// TODO - capture new threads to email later.
-// TODO - Only respond on the first item for thread.
+// DONE - capture new threads to email later.
+// DONE - Only respond on the first item for thread.
 // DONE - Get hosts and ports
 // DONE - moved magic valued to appsettings.json
+// TODO - Add time span to wait for gone message, tweak timer frequency.
 
 namespace JabberTest
 {
@@ -95,16 +96,22 @@ namespace JabberTest
 
             msgHub.Subscribe<ActiveMessage>(m => 
             {
-                var email = emailCollection.GetOrAdd(m.message.Thread, e => new Email(m.message.From.Bare));
-                if (email.mailBody.Length < 1)
+                var email = emailCollection.GetOrAdd(m.message.Thread, e => new Email(m.message.From.Bare, m.message.Thread));
+                Monitor.Enter(email);
+                try
                 {
-                    var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
-                    var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
-                    xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
-
+                    if (email.mailBody.Length < 1)
+                    {
+                        var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
+                        var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
+                        xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
+                    }
+                    email.AddString(m.message.Body);
                 }
-
-                email.AddString(m.message.Body);
+                finally
+                {
+                    Monitor.Exit(email);
+                }
 
             });
 
@@ -113,34 +120,40 @@ namespace JabberTest
                Email email;
                if (emailCollection.TryRemove(m.Thread, out email))
                {
-                   using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
-                    {
-
-                       client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-                       client.CheckCertificateRevocation = false;
-
-                       client.ConnectAsync(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable).GetAwaiter().GetResult();
-
-                       var mailMsg = new MimeMessage();
-
-                       mailMsg.From.Add(new MailboxAddress(email.EmailFrom));
-                       mailMsg.To.Add(new MailboxAddress(appConfig.UserName));
-
-                       mailMsg.Subject = $"ShoreTel message from {email.EmailFrom}";
-
-                       var builder = new BodyBuilder
+                   Monitor.Enter(email);
+                   try
+                   {
+                       using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
                        {
-                           TextBody = email.mailBody.ToString()
-                       };
 
-                       mailMsg.Body = builder.ToMessageBody();
+                           client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+                           client.CheckCertificateRevocation = false;
 
-                       client.SendAsync(mailMsg).GetAwaiter().GetResult();
+                           client.ConnectAsync(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable).GetAwaiter().GetResult();
 
-                       client.DisconnectAsync(true).GetAwaiter().GetResult();
+                           var mailMsg = new MimeMessage();
+
+                           mailMsg.From.Add(new MailboxAddress(email.EmailFrom));
+                           mailMsg.To.Add(new MailboxAddress(appConfig.UserName));
+
+                           mailMsg.Subject = $"ShoreTel message from {email.EmailFrom}";
+
+                           var builder = new BodyBuilder
+                           {
+                               TextBody = email.mailBody.ToString()
+                           };
+
+                           mailMsg.Body = builder.ToMessageBody();
+
+                           client.SendAsync(mailMsg).GetAwaiter().GetResult();
+
+                           client.DisconnectAsync(true).GetAwaiter().GetResult();
+                       }
                    }
-
-                   
+                   finally
+                   {
+                       Monitor.Exit(email);
+                   }
                }
            });
             
@@ -190,7 +203,7 @@ namespace JabberTest
                         case Matrix.Xmpp.Chatstates.Chatstate.Composing:
                             break;
                         case Matrix.Xmpp.Chatstates.Chatstate.Gone:
-                            msgHub.Publish(new GoneMessage(msg));
+                            msgHub.Publish(new GoneMessage(msg.Thread));
                             break;
 
                     }
@@ -212,7 +225,7 @@ namespace JabberTest
             // Send our presence to the server
             xmppClient.SendPresenceAsync(Show.Chat, "free for chat").GetAwaiter().GetResult();
 
-            Timer t = new Timer(TimerCallback, null, 0, 2000);
+            Timer t = new Timer(TimerCallback, null, 0, 1000);
 
             Console.ReadLine();
 
@@ -225,7 +238,24 @@ namespace JabberTest
 
         private static void TimerCallback(Object o)
         {
-            //messenger.Publish(new MyMessage());
+            foreach (var email in emailCollection.Values )
+            {
+                Monitor.Enter(email);
+                try
+                {
+                    if (email.GetSpanFromLastAccess().Minutes > 1 )
+                    {
+                        msgHub.Publish(new GoneMessage(email.Thread));
+                    }
+                }
+                finally
+                {
+                    Monitor.Exit(email);
+                }
+
+            }
+
+            
         }
 
 
