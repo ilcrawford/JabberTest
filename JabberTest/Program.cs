@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -48,6 +49,9 @@ namespace JabberTest
         static ServiceProvider serviceProvider;
         static Microsoft.Extensions.Logging.ILogger logger;
         static TinyMessengerHub msgHub = new TinyMessengerHub();
+        static ConcurrentDictionary<string, Email> emailCollection = new ConcurrentDictionary<string, Email>();
+        static AppSettingsConfig appConfig = new AppSettingsConfig();
+        static XmppClient xmppClient;
 
         /// <summary>
         /// Setup services for dependency injection
@@ -74,25 +78,13 @@ namespace JabberTest
             serviceProvider = serviceCollection.BuildServiceProvider();
 
             logger = serviceProvider.GetService<ILogger<Program>>();
-            //var config = serviceProvider.GetService<IConfiguration>();
-
-
-
-            msgHub.Subscribe<MyMessage>(m => 
-            { 
-                logger.LogInformation("mymessage test");
-                logger.LogInformation($"From {m.message.From}");
-            });
-
-            var configBuilder = new ConfigurationBuilder()
-               .SetBasePath(Directory.GetCurrentDirectory())
-               .AddJsonFile("AppSettings.json", optional: true)
-               .AddUserSecrets<Program>();
-            var config = configBuilder.Build();
-            var appConfig = new AppSettingsConfig();
-            config.GetSection("AppSettings").Bind(appConfig);
-
             
+            var configBuilder = new ConfigurationBuilder()
+              .SetBasePath(Directory.GetCurrentDirectory())
+              .AddJsonFile("AppSettings.json", optional: true)
+              .AddUserSecrets<Program>();
+            var config = configBuilder.Build();
+            config.GetSection("AppSettings").Bind(appConfig);
 
             logger.LogDebug($"Shortel Token {appConfig.ShoreTelToken}");
             logger.LogDebug($"Shoretel Host {appConfig.Host}");
@@ -101,17 +93,68 @@ namespace JabberTest
             logger.LogDebug($"Smtp Host {appConfig.SmtpHost}");
             logger.LogDebug($"Smtp port {appConfig.SmtpPort}");
 
+            msgHub.Subscribe<ActiveMessage>(m => 
+            {
+                var email = emailCollection.GetOrAdd(m.message.Thread, e => new Email(m.message.From.Bare));
+                if (email.mailBody.Length < 1)
+                {
+                    var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
+                    var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
+                    xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
+
+                }
+
+                email.AddString(m.message.Body);
+
+            });
+
+            msgHub.Subscribe<GoneMessage>(m =>
+           {
+               Email email;
+               if (emailCollection.TryRemove(m.Thread, out email))
+               {
+                   using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
+                    {
+
+                       client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+                       client.CheckCertificateRevocation = false;
+
+                       client.ConnectAsync(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable).GetAwaiter().GetResult();
+
+                       var mailMsg = new MimeMessage();
+
+                       mailMsg.From.Add(new MailboxAddress(email.EmailFrom));
+                       mailMsg.To.Add(new MailboxAddress(appConfig.UserName));
+
+                       mailMsg.Subject = $"ShoreTel message from {email.EmailFrom}";
+
+                       var builder = new BodyBuilder
+                       {
+                           TextBody = email.mailBody.ToString()
+                       };
+
+                       mailMsg.Body = builder.ToMessageBody();
+
+                       client.SendAsync(mailMsg).GetAwaiter().GetResult();
+
+                       client.DisconnectAsync(true).GetAwaiter().GetResult();
+                   }
+
+                   
+               }
+           });
+            
+
             var pipelineInitializerAction = new Action<IChannelPipeline, ISession>((pipeline, session) =>
             {
                 pipeline.AddFirst(new MyLoggingHandler(logger));
             });
 
-
-            var xmppClient = new XmppClient()
+            xmppClient = new XmppClient()
             {
                 Username = appConfig.UserName,
                 XmppDomain = appConfig.Domain,
-                SaslHandler = new ShoretelSSOProcessor(),
+                SaslHandler = new ShoretelSSOProcessor(appConfig.ShoreTelToken),
                 // use a local server for dev purposes running
                 // on a non standard XMPP port 5333
                 HostnameResolver = new StaticNameResolver(IPAddress.Parse(appConfig.Host), appConfig.Port)
@@ -128,7 +171,7 @@ namespace JabberTest
                 .Where(el => el is Presence)
                 .Subscribe(el =>
                 {
-                    Console.WriteLine(el.ToString());
+                    //Console.WriteLine(el.ToString());
                     //logger.LogInformation(el.ToString());
                 });
 
@@ -139,59 +182,18 @@ namespace JabberTest
                 {
                     var msg = el as Message;
 
-                    msgHub.Publish(new MyMessage(msg));
-                    //msgHub.Publish(new MatrixMessage(xmppClient, msg));
+                    switch (msg.Chatstate)
+                    {
+                        case Matrix.Xmpp.Chatstates.Chatstate.Active:
+                            msgHub.Publish(new ActiveMessage(msg));
+                            break;
+                        case Matrix.Xmpp.Chatstates.Chatstate.Composing:
+                            break;
+                        case Matrix.Xmpp.Chatstates.Chatstate.Gone:
+                            msgHub.Publish(new GoneMessage(msg));
+                            break;
 
-                    //if (msg.Chatstate == Matrix.Xmpp.Chatstates.Chatstate.Composing)
-                    //{
-                    //    //    var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
-                    //    //    var sndMsg = new Matrix.Xmpp.Client.Message(msg.From, MessageType.Chat, txtMsg, "");
-
-                    //    //    xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
-                    //}
-
-                    logger.LogInformation(el.ToString());
-
-                    //try
-                    //{
-                    //    using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
-                    //    {
-
-                    //        client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-                    //        client.CheckCertificateRevocation = false;
-
-
-
-                    //        client.Connect(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable);
-
-                    //        var mailMsg = new MimeMessage();
-
-                    //        mailMsg.From.Add(new MailboxAddress(appConfig.UserName));
-                    //        mailMsg.To.Add(new MailboxAddress("icrawford@maxor.com"));
-
-                    //        mailMsg.Subject = msg.From.Bare;
-
-                    //        var builder = new BodyBuilder
-                    //        {
-                    //            TextBody = msg.Body
-                    //        };
-
-
-                    //        mailMsg.Body = builder.ToMessageBody();
-
-
-                    //        client.Send(mailMsg);
-
-                    //        client.Disconnect(true);
-                    //    }
-
-                    //}
-                    //catch (Exception e)
-                    //{
-
-                    //    logger.LogError(e.Message.ToString());
-                    //}
-
+                    }
 
 
                 });
@@ -210,6 +212,8 @@ namespace JabberTest
             // Send our presence to the server
             xmppClient.SendPresenceAsync(Show.Chat, "free for chat").GetAwaiter().GetResult();
 
+            Timer t = new Timer(TimerCallback, null, 0, 2000);
+
             Console.ReadLine();
 
             // Disconnect the XMPP connection
@@ -219,18 +223,14 @@ namespace JabberTest
 
         }
 
-    }
-
-    class MyMessage : ITinyMessage
-    {
-        public object Sender { get; private set; }
-        public Message message { get; set; }
-
-        public MyMessage(Message msg)
+        private static void TimerCallback(Object o)
         {
-            message = msg;
+            //messenger.Publish(new MyMessage());
         }
+
+
     }
+
 
 }
 

@@ -13,6 +13,11 @@ namespace JabberTest
     
     class ShoretelSSOProcessor : IAuthenticate
     {
+        private string _ShoretelToken = "";
+        public ShoretelSSOProcessor(string shortelToken)
+        {
+            _ShoretelToken = shortelToken;
+        }
         public async Task<XmppXElement> AuthenticateAsync(Mechanisms mechanisms, XmppClient xmppClient, CancellationToken cancellationToken)
         {
             var authMessage = new Auth(Matrix.Xmpp.Sasl.SaslMechanism.Plain, GetMessage(xmppClient));
@@ -30,7 +35,7 @@ namespace JabberTest
             //sb.Append((char)0);
             //sb.Append(xmppClient.Password);
             //byte[] msg = Encoding.UTF8.GetBytes(sb.ToString());
-            return "AGljcmF3Zm9yZAB7InNlc3Npb24taWQiOiIwYTY0MjAwYjUxMjkwYzQyMjE1NDVjMDE3YWUzZjI1M2RlMjY5NGUxODRiNDg1YTkiLCJsb2dvbi11cmwiOiJodHRwOi8vMTAuMTAwLjMyLjExOjU0NDkvbWdtdC1hcGkiLCJicm93c2VyLWlwIjoiMTAuMTAwLjIwLjEzMSIsInVzZXItaWQiOiJpY3Jhd2ZvcmQiLCJ1c2VyLXJvbGUiOiJ1c2VyX3JvbGUifQ==";
+            return _ShoretelToken;
         }
     }
 }
