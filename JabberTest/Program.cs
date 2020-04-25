@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Reactive.Linq;
 using System.Threading;
@@ -8,6 +9,8 @@ using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
 
 using MailKit.Net.Smtp;
+using MailKit.Security;
+
 using MimeKit;
 
 using Matrix;
@@ -26,21 +29,26 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.Configuration.UserSecrets;
 
-
 using Serilog.Extensions.Logging;
 using Serilog;
-using MailKit.Security;
-using System.IO;
+
+using TinyMessenger;
+
 
 // TODO - capture new threads to email later.
 // TODO - Only respond on the first item for thread.
-// TODO - Get hosts and ports
+// DONE - Get hosts and ports
 // DONE - moved magic valued to appsettings.json
 
 namespace JabberTest
 {
     class Program
     {
+        static ServiceCollection serviceCollection = new ServiceCollection();
+        static ServiceProvider serviceProvider;
+        static Microsoft.Extensions.Logging.ILogger logger;
+        static TinyMessengerHub msgHub = new TinyMessengerHub();
+
         /// <summary>
         /// Setup services for dependency injection
         /// </summary>
@@ -55,19 +63,26 @@ namespace JabberTest
             services.AddLogging(configure => configure.AddSerilog())
                     .AddTransient<Program>();
 
-           
 
         }
+
+       
         static void Main(string[] args)
         {
-            var serviceCollection = new ServiceCollection();
             ConfigureServices(serviceCollection);
 
-            var serviceProvider = serviceCollection.BuildServiceProvider();
+            serviceProvider = serviceCollection.BuildServiceProvider();
 
-            var logger = serviceProvider.GetService<ILogger<Program>>();
-//            var config = serviceProvider.GetService<IConfiguration>();
+            logger = serviceProvider.GetService<ILogger<Program>>();
+            //var config = serviceProvider.GetService<IConfiguration>();
 
+
+
+            msgHub.Subscribe<MyMessage>(m => 
+            { 
+                logger.LogInformation("mymessage test");
+                logger.LogInformation($"From {m.message.From}");
+            });
 
             var configBuilder = new ConfigurationBuilder()
                .SetBasePath(Directory.GetCurrentDirectory())
@@ -124,55 +139,58 @@ namespace JabberTest
                 {
                     var msg = el as Message;
 
-                    if (msg.Chatstate == Matrix.Xmpp.Chatstates.Chatstate.Composing)
-                    {
-                        //    var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
-                        //    var sndMsg = new Matrix.Xmpp.Client.Message(msg.From, MessageType.Chat, txtMsg, "");
+                    msgHub.Publish(new MyMessage(msg));
+                    //msgHub.Publish(new MatrixMessage(xmppClient, msg));
 
-                        //    xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
-                    }
+                    //if (msg.Chatstate == Matrix.Xmpp.Chatstates.Chatstate.Composing)
+                    //{
+                    //    //    var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
+                    //    //    var sndMsg = new Matrix.Xmpp.Client.Message(msg.From, MessageType.Chat, txtMsg, "");
+
+                    //    //    xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
+                    //}
 
                     logger.LogInformation(el.ToString());
 
-                    try
-                    {
-                        using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
-                        {
+                    //try
+                    //{
+                    //    using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
+                    //    {
 
-                            client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-                            client.CheckCertificateRevocation = false;
-
-
-
-                            client.Connect(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable);
-
-                            var mailMsg = new MimeMessage();
-
-                            mailMsg.From.Add(new MailboxAddress(appConfig.UserName));
-                            mailMsg.To.Add(new MailboxAddress("icrawford@maxor.com"));
-
-                            mailMsg.Subject = msg.From.Bare;
-
-                            var builder = new BodyBuilder
-                            {
-                                TextBody = msg.Body
-                            };
+                    //        client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+                    //        client.CheckCertificateRevocation = false;
 
 
-                            mailMsg.Body = builder.ToMessageBody();
+
+                    //        client.Connect(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable);
+
+                    //        var mailMsg = new MimeMessage();
+
+                    //        mailMsg.From.Add(new MailboxAddress(appConfig.UserName));
+                    //        mailMsg.To.Add(new MailboxAddress("icrawford@maxor.com"));
+
+                    //        mailMsg.Subject = msg.From.Bare;
+
+                    //        var builder = new BodyBuilder
+                    //        {
+                    //            TextBody = msg.Body
+                    //        };
 
 
-                            client.Send(mailMsg);
+                    //        mailMsg.Body = builder.ToMessageBody();
 
-                            client.Disconnect(true);
-                        }
 
-                    }
-                    catch (Exception e)
-                    {
+                    //        client.Send(mailMsg);
 
-                        logger.LogError(e.Message.ToString());
-                    }
+                    //        client.Disconnect(true);
+                    //    }
+
+                    //}
+                    //catch (Exception e)
+                    //{
+
+                    //    logger.LogError(e.Message.ToString());
+                    //}
 
 
 
@@ -203,6 +221,16 @@ namespace JabberTest
 
     }
 
-    
+    class MyMessage : ITinyMessage
+    {
+        public object Sender { get; private set; }
+        public Message message { get; set; }
+
+        public MyMessage(Message msg)
+        {
+            message = msg;
+        }
+    }
+
 }
 
