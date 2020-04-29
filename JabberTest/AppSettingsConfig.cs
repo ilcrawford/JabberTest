@@ -15,5 +15,9 @@ namespace JabberTest
         public string SmtpHost { get; set; }
         public int SmtpPort { get; set; }
 
+        public int SendEmailDelay { get; set; }
+
+        public List<string> UsersToRespondTo { get; set; }
+
     }
 }

@@ -93,6 +93,11 @@ namespace JabberTest
             logger.LogDebug($"Shortel Username {appConfig.UserName}");
             logger.LogDebug($"Smtp Host {appConfig.SmtpHost}");
             logger.LogDebug($"Smtp port {appConfig.SmtpPort}");
+            foreach (string user in appConfig.UsersToRespondTo)
+            {
+                logger.LogDebug($"Users to respond to {user}");
+            }
+            
 
             msgHub.Subscribe<ActiveMessage>(m => 
             {
@@ -102,9 +107,13 @@ namespace JabberTest
                 {
                     if (email.mailBody.Length < 1)
                     {
-                        var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
-                        var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
-                        xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
+                        if (appConfig.UsersToRespondTo.FindIndex(x => x.Equals(email.EmailFrom, StringComparison.OrdinalIgnoreCase)) >= 0)
+                        {
+                            var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
+                            var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
+                            xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
+                        }
+
                     }
                     email.AddString(m.message.Body);
                 }
@@ -243,7 +252,7 @@ namespace JabberTest
                 Monitor.Enter(email);
                 try
                 {
-                    if (email.GetSpanFromLastAccess().Minutes > 1 )
+                    if (email.GetSpanFromLastAccess().Minutes >= appConfig.SendEmailDelay )
                     {
                         msgHub.Publish(new GoneMessage(email.Thread));
                     }
