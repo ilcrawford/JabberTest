@@ -16,9 +16,9 @@ namespace JabberTest
         {
             return DateTime.Now.Subtract(LastAccess);
         } 
-        public void AddString(string newLines)
+        public void AddString(string newLine)
         {
-            mailBody.Append(newLines);
+            mailBody.AppendLine(newLine);
             LastAccess = DateTime.Now;
         }
 

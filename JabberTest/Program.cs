@@ -46,12 +46,12 @@ namespace JabberTest
 {
     class Program
     {
-        static ServiceCollection serviceCollection = new ServiceCollection();
+        static readonly ServiceCollection serviceCollection = new ServiceCollection();
         static ServiceProvider serviceProvider;
         static Microsoft.Extensions.Logging.ILogger logger;
-        static TinyMessengerHub msgHub = new TinyMessengerHub();
-        static ConcurrentDictionary<string, Email> emailCollection = new ConcurrentDictionary<string, Email>();
-        static AppSettingsConfig appConfig = new AppSettingsConfig();
+        static readonly TinyMessengerHub msgHub = new TinyMessengerHub();
+        static readonly ConcurrentDictionary<string, Email> emailCollection = new ConcurrentDictionary<string, Email>();
+        static readonly AppSettingsConfig appConfig = new AppSettingsConfig();
         static XmppClient xmppClient;
 
         /// <summary>
