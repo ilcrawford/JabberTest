@@ -30,7 +30,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.Configuration.UserSecrets;
 
-using Serilog.Extensions.Logging;
+using Serilog.Configuration;
 using Serilog;
 
 using TinyMessenger;
@@ -60,9 +60,17 @@ namespace JabberTest
         /// <param name="services"></param>
         private static void ConfigureServices(IServiceCollection services)
         {
+            var configBuilder = new ConfigurationBuilder()
+             .SetBasePath(Directory.GetCurrentDirectory())
+             .AddJsonFile("AppSettings.json", optional: true)
+             .AddUserSecrets<Program>();
+            var config = configBuilder.Build();
+            config.GetSection("AppSettings").Bind(appConfig);
+
             Log.Logger = new LoggerConfiguration()
-                .WriteTo.File("console.log")
-                .MinimumLevel.Verbose()
+                .ReadFrom.Configuration(config)
+                //.WriteTo.File("console.log")
+                //.MinimumLevel.Verbose()
                 .CreateLogger();
 
             services.AddLogging(configure => configure.AddSerilog())
@@ -79,90 +87,97 @@ namespace JabberTest
             serviceProvider = serviceCollection.BuildServiceProvider();
 
             logger = serviceProvider.GetService<ILogger<Program>>();
-            
-            var configBuilder = new ConfigurationBuilder()
-              .SetBasePath(Directory.GetCurrentDirectory())
-              .AddJsonFile("AppSettings.json", optional: true)
-              .AddUserSecrets<Program>();
-            var config = configBuilder.Build();
-            config.GetSection("AppSettings").Bind(appConfig);
 
-            logger.LogDebug($"Shortel Token {appConfig.ShoreTelToken}");
-            logger.LogDebug($"Shoretel Host {appConfig.Host}");
-            logger.LogDebug($"Shortel Domain {appConfig.Domain}");
-            logger.LogDebug($"Shortel Username {appConfig.UserName}");
-            logger.LogDebug($"Smtp Host {appConfig.SmtpHost}");
-            logger.LogDebug($"Smtp port {appConfig.SmtpPort}");
+            logger.LogInformation($"Shortel Token {appConfig.ShoreTelToken}");
+            logger.LogInformation($"Shoretel Host {appConfig.Host}");
+            logger.LogInformation($"Shortel Domain {appConfig.Domain}");
+            logger.LogInformation($"Shortel Username {appConfig.UserName}");
+            logger.LogInformation($"Smtp Host {appConfig.SmtpHost}");
+            logger.LogInformation($"Smtp port {appConfig.SmtpPort}");
             foreach (string user in appConfig.UsersToRespondTo)
             {
-                logger.LogDebug($"Users to respond to {user}");
+                logger.LogInformation($"Users to respond to {user}");
             }
             
 
             msgHub.Subscribe<ActiveMessage>(m => 
             {
-                var email = emailCollection.GetOrAdd(m.message.Thread, e => new Email(m.message.From.Bare, m.message.Thread));
-                Monitor.Enter(email);
                 try
                 {
-                    if (email.mailBody.Length < 1)
+                    var email = emailCollection.GetOrAdd(m.message.Thread, e => new Email(m.message.From.Bare, m.message.Thread));
+                    Monitor.Enter(email);
+                    try
                     {
-                        if (appConfig.UsersToRespondTo.FindIndex(x => x.Equals(email.EmailFrom, StringComparison.OrdinalIgnoreCase)) >= 0)
+                        if (email.mailBody.Length < 1)
                         {
-                            var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
-                            var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
-                            xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
-                        }
+                            if (appConfig.UsersToRespondTo.FindIndex(x => x.Equals(email.EmailFrom, StringComparison.OrdinalIgnoreCase)) >= 0)
+                            {
+                                var txtMsg = "I am unable to respond to ShoreTel IMs right now.  Leave a message, exit the conversation and I will get back with you,";
+                                var sndMsg = new Matrix.Xmpp.Client.Message(m.message.From, MessageType.Chat, txtMsg, "");
+                                xmppClient.SendAsync(sndMsg).GetAwaiter().GetResult();
+                            }
 
+                        }
+                        email.AddString(m.message.Body);
                     }
-                    email.AddString(m.message.Body);
+                    finally
+                    {
+                        Monitor.Exit(email);
+                    }
                 }
-                finally
+                catch (Exception e)
                 {
-                    Monitor.Exit(email);
+                    logger.LogError($"Active message error {e.Message}");
                 }
 
             });
 
             msgHub.Subscribe<GoneMessage>(m =>
            {
-               Email email;
-               if (emailCollection.TryRemove(m.Thread, out email))
+               try
                {
-                   Monitor.Enter(email);
-                   try
+                   Email email;
+                   if (emailCollection.TryRemove(m.Thread, out email))
                    {
-                       using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
+                       Monitor.Enter(email);
+                       try
                        {
-
-                           client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-                           client.CheckCertificateRevocation = false;
-
-                           client.ConnectAsync(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable).GetAwaiter().GetResult();
-
-                           var mailMsg = new MimeMessage();
-
-                           mailMsg.From.Add(new MailboxAddress(email.EmailFrom));
-                           mailMsg.To.Add(new MailboxAddress(appConfig.UserName));
-
-                           mailMsg.Subject = $"ShoreTel message from {email.EmailFrom}";
-
-                           var builder = new BodyBuilder
+                           using (var client = new SmtpClient(new MailKit.ProtocolLogger("smtp.log", false)))
                            {
-                               TextBody = email.mailBody.ToString()
-                           };
 
-                           mailMsg.Body = builder.ToMessageBody();
+                               client.ServerCertificateValidationCallback = (s, c, h, e) => true;
+                               client.CheckCertificateRevocation = false;
 
-                           client.SendAsync(mailMsg).GetAwaiter().GetResult();
+                               client.ConnectAsync(appConfig.SmtpHost, appConfig.SmtpPort, SecureSocketOptions.StartTlsWhenAvailable).GetAwaiter().GetResult();
 
-                           client.DisconnectAsync(true).GetAwaiter().GetResult();
+                               var mailMsg = new MimeMessage();
+
+                               mailMsg.From.Add(new MailboxAddress(email.EmailFrom));
+                               mailMsg.To.Add(new MailboxAddress(appConfig.UserName));
+
+                               mailMsg.Subject = $"ShoreTel message from {email.EmailFrom}";
+
+                               var builder = new BodyBuilder
+                               {
+                                   TextBody = email.mailBody.ToString()
+                               };
+
+                               mailMsg.Body = builder.ToMessageBody();
+
+                               client.SendAsync(mailMsg).GetAwaiter().GetResult();
+
+                               client.DisconnectAsync(true).GetAwaiter().GetResult();
+                           }
+                       }
+                       finally
+                       {
+                           Monitor.Exit(email);
                        }
                    }
-                   finally
-                   {
-                       Monitor.Exit(email);
-                   }
+               }
+               catch (Exception e)
+               {
+                   logger.LogError($"Gone message error {e.Message}");
                }
            });
             
@@ -241,18 +256,19 @@ namespace JabberTest
             // Disconnect the XMPP connection
             xmppClient.DisconnectAsync().GetAwaiter().GetResult();
 
-            Console.ReadLine();
 
         }
 
         private static void TimerCallback(Object o)
         {
+
             foreach (var email in emailCollection.Values )
             {
                 Monitor.Enter(email);
                 try
                 {
-                    if (email.GetSpanFromLastAccess().Minutes >= appConfig.SendEmailDelay )
+                    logger.LogDebug($"Tick {email.GetSpanFromLastAccess().TotalSeconds}");
+                    if (email.GetSpanFromLastAccess().TotalMinutes >= appConfig.SendEmailDelay )
                     {
                         msgHub.Publish(new GoneMessage(email.Thread));
                     }
