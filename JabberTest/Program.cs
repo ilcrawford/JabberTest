@@ -49,7 +49,7 @@ namespace JabberTest
         static readonly ServiceCollection serviceCollection = new ServiceCollection();
         static ServiceProvider serviceProvider;
         static Microsoft.Extensions.Logging.ILogger logger;
-        static readonly TinyMessengerHub msgHub = new TinyMessengerHub();
+        static TinyMessengerHub msgHub;
         static readonly ConcurrentDictionary<string, Email> emailCollection = new ConcurrentDictionary<string, Email>();
         static readonly AppSettingsConfig appConfig = new AppSettingsConfig();
         static XmppClient xmppClient;
@@ -94,14 +94,17 @@ namespace JabberTest
             logger.LogInformation($"Shortel Username {appConfig.UserName}");
             logger.LogInformation($"Smtp Host {appConfig.SmtpHost}");
             logger.LogInformation($"Smtp port {appConfig.SmtpPort}");
+            logger.LogInformation($"Smtp port {appConfig.SendEmailDelay}");
             foreach (string user in appConfig.UsersToRespondTo)
             {
                 logger.LogInformation($"Users to respond to {user}");
             }
-            
+
+            msgHub = new TinyMessengerHub(new ErrorHandler(logger));
 
             msgHub.Subscribe<ActiveMessage>(m => 
             {
+                logger.LogDebug("Enter ActiveMessage");
                 try
                 {
                     var email = emailCollection.GetOrAdd(m.message.Thread, e => new Email(m.message.From.Bare, m.message.Thread));
@@ -129,11 +132,12 @@ namespace JabberTest
                 {
                     logger.LogError($"Active message error {e.Message}");
                 }
-
+                logger.LogDebug("Exit ActiveMessage");
             });
 
             msgHub.Subscribe<GoneMessage>(m =>
            {
+               logger.LogDebug("Enter GoneMessage");
                try
                {
                    Email email;
@@ -179,6 +183,7 @@ namespace JabberTest
                {
                    logger.LogError($"Gone message error {e.Message}");
                }
+               logger.LogDebug("Exit GoneMessage");
            });
             
 
@@ -208,8 +213,10 @@ namespace JabberTest
                 .Where(el => el is Presence)
                 .Subscribe(el =>
                 {
+                    logger.LogDebug("Enter Presence observer");
                     //Console.WriteLine(el.ToString());
                     //logger.LogInformation(el.ToString());
+                    logger.LogDebug("Exit Presence observer");
                 });
 
             xmppClient
@@ -217,22 +224,23 @@ namespace JabberTest
                 .Where(el => el is Message)
                 .Subscribe(el =>
                 {
+                    logger.LogDebug("Enter Message observer");
                     var msg = el as Message;
 
                     switch (msg.Chatstate)
                     {
                         case Matrix.Xmpp.Chatstates.Chatstate.Active:
-                            msgHub.Publish(new ActiveMessage(msg));
+                            msgHub.PublishAsync(new ActiveMessage(msg), x => { });
                             break;
                         case Matrix.Xmpp.Chatstates.Chatstate.Composing:
                             break;
                         case Matrix.Xmpp.Chatstates.Chatstate.Gone:
-                            msgHub.Publish(new GoneMessage(msg.Thread));
+                            msgHub.PublishAsync(new GoneMessage(msg.Thread), x => { });
                             break;
 
                     }
 
-
+                    logger.LogDebug("Exit Message observer");
                 });
 
             xmppClient
@@ -249,28 +257,32 @@ namespace JabberTest
             // Send our presence to the server
             xmppClient.SendPresenceAsync(Show.Chat, "free for chat").GetAwaiter().GetResult();
 
-            Timer t = new Timer(TimerCallback, null, 0, 1000);
-
-            Console.ReadLine();
+            using (Timer t = new Timer(TimerCallback, null, 0, 1000))
+            {
+                Console.ReadLine();
+            }
 
             // Disconnect the XMPP connection
             xmppClient.DisconnectAsync().GetAwaiter().GetResult();
-
 
         }
 
         private static void TimerCallback(Object o)
         {
+            logger.LogDebug($"Enter TimerCallback");
+
+           
 
             foreach (var email in emailCollection.Values )
             {
+                
                 Monitor.Enter(email);
                 try
                 {
-                    logger.LogDebug($"Tick {email.GetSpanFromLastAccess().TotalSeconds}");
+                    logger.LogDebug($"Tick {email.GetSpanFromLastAccess().TotalMinutes}");
                     if (email.GetSpanFromLastAccess().TotalMinutes >= appConfig.SendEmailDelay )
                     {
-                        msgHub.Publish(new GoneMessage(email.Thread));
+                        msgHub.PublishAsync(new GoneMessage(email.Thread), x => { });
                     }
                 }
                 finally
@@ -280,9 +292,23 @@ namespace JabberTest
 
             }
 
-            
+            logger.LogDebug($"Exit TimerCallback ");
         }
 
+        class ErrorHandler: ISubscriberErrorHandler
+        {
+            private Microsoft.Extensions.Logging.ILogger logger;
+            public ErrorHandler(Microsoft.Extensions.Logging.ILogger logger)
+            {
+                this.logger = logger;
+            }
+            public void Handle(ITinyMessage message, Exception exception)
+            {
+                logger.LogError($"TinyMessenger ERROR {message}, {exception.Message}");
+
+            }
+
+        }
 
     }
 
