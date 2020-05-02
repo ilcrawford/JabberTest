@@ -8,18 +8,19 @@ namespace ChannelTester
     {
         static async Task Main(string[] args)
         {
-            var joe = CreateMessenger("Joe", 5);
-            var ann = CreateMessenger("Ann", 10);
-            while ( await joe.WaitToReadAsync() || await ann.WaitToReadAsync())
-            {
-                Console.WriteLine(await joe.ReadAsync());
-                Console.WriteLine(await ann.ReadAsync());
-            }
+            var joe = CreateMessenger("Joe", 5, 6);
+            var ann = CreateMessenger("Ann", 10, 2);
+
+            var ch = Merge(joe, ann);
+
+            await foreach (var item in ch.ReadAllAsync())
+                Console.WriteLine(item);
+  
             
         }
 
         
-        static ChannelReader<string> CreateMessenger(string msg, int count)
+        static ChannelReader<string> CreateMessenger(string msg, int count, int rndWait)
         {
             var ch = Channel.CreateUnbounded<string>();
             var rnd = new Random();
@@ -29,7 +30,7 @@ namespace ChannelTester
                 for (int i = 0; i < count; i++)
                 {
                     await ch.Writer.WriteAsync($"{msg} {i}");
-                    await Task.Delay(TimeSpan.FromSeconds(rnd.Next(3)));
+                    await Task.Delay(TimeSpan.FromSeconds(rnd.Next(rndWait)));
                 }
                 ch.Writer.Complete();
             });
