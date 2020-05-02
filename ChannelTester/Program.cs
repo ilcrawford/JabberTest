@@ -9,7 +9,13 @@ namespace ChannelTester
         static async Task Main(string[] args)
         {
             var joe = CreateMessenger("Joe", 5);
-            await foreach (var item in joe.ReadAllAsync()) Console.WriteLine(item);
+            var ann = CreateMessenger("Ann", 10);
+            while ( await joe.WaitToReadAsync() || await ann.WaitToReadAsync())
+            {
+                Console.WriteLine(await joe.ReadAsync());
+                Console.WriteLine(await ann.ReadAsync());
+            }
+            
         }
 
         
