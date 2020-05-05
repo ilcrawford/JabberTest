@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -10,36 +11,88 @@ namespace ChannelTester
     {
         static async Task Main(string[] args)
         {
-            var joe = CreateMessenger("Joe", 5, 6);
-            var ann = CreateMessenger("Ann", 10, 2);
-            var jam = CreateMessenger("jam", 20, 1);
+            var dir = GetFilesRecursively("C:\\Users\\ilcra_000\\source\\repos\\JabberTest");
+            var src = FilterByExtension(dir, new HashSet<string> { ".cs" });
+            var cnt = GetLineCount(src);
 
-            var ch = Merge(joe, ann, jam);
-
-            await foreach (var item in ch.ReadAllAsync())
-                Console.WriteLine(item);
-
-            jam = CreateMessenger("jam", 20, 1);
-            var readers = Split<string>(jam, 3);
-            var tasks = new List<Task>();
-            for (int i = 0; i < readers.Count; i++)
+            var total = 0;
+            await foreach (var item in cnt.ReadAllAsync())
             {
-                var reader = readers[i];
-                var index = i;
-                tasks.Add(Task.Run(async () =>
-                {
-                    await foreach (var item in reader.ReadAllAsync())
-                        Console.WriteLine($"Reader {index}: {item}");
-                }));
+                Console.WriteLine($"{item.file.FullName} {item.lines}");
+                total += item.lines;
             }
 
-            await Task.WhenAll(tasks);
-
-
-
+            Console.WriteLine($"Total lines: {total}");
         }
 
-        
+        static ChannelReader<string> GetFilesRecursively(string root)
+        {
+            var output = Channel.CreateUnbounded<string>();
+
+            async Task WalkDir(string path)
+            {
+                foreach (var file in Directory.GetFiles(path))
+                    await output.Writer.WriteAsync(file);
+
+                var tasks = Directory.GetDirectories(path).Select(WalkDir);
+                await Task.WhenAll(tasks.ToArray());
+            }
+
+            Task.Run(async () =>
+            {
+                await WalkDir(root);
+                output.Writer.Complete();
+            });
+
+            return output;
+        }
+
+        static ChannelReader<FileInfo> FilterByExtension(ChannelReader<string> input, HashSet<string> exts)
+        {
+            var output = Channel.CreateUnbounded<FileInfo>();
+
+            Task.Run(async () =>
+            {
+                await foreach (var file in input.ReadAllAsync())
+                {
+                    var fileInfo = new FileInfo(file);
+                    if (exts.Contains(fileInfo.Extension))
+                        await output.Writer.WriteAsync(fileInfo);
+                }
+                output.Writer.Complete();
+            });
+
+            return output;
+        }
+
+        static ChannelReader<(FileInfo file, int lines)> GetLineCount(ChannelReader<FileInfo> input)
+        {
+            var output = Channel.CreateUnbounded<(FileInfo, int)>();
+
+            Task.Run(async () =>
+            {
+                await foreach (var file in input.ReadAllAsync())
+                {
+                    var lines = CountLines(file);
+                    await output.Writer.WriteAsync((file, lines));
+                }
+                output.Writer.Complete();
+            });
+
+            return output;
+        }
+
+        static int CountLines(FileInfo file)
+        {
+            using var sr = new StreamReader(file.FullName);
+            var lines = 0;
+
+            while (sr.ReadLine() != null)
+                lines++;
+
+            return lines;
+        }
+
         static ChannelReader<string> CreateMessenger(string msg, int count, int rndWait)
         {
             var ch = Channel.CreateUnbounded<string>();
