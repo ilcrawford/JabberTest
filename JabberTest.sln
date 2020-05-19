@@ -7,7 +7,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "JabberTest", "JabberTest\Ja
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TinyMessengerTest", "TinyMessengerTest\TinyMessengerTest.csproj", "{5592DB22-CC4C-4593-A143-B084F5546EB7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ChannelTester", "ChannelTester\ChannelTester.csproj", "{76A0E1D8-7DCB-44C7-8125-14AEB94500E9}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ChannelTester", "ChannelTester\ChannelTester.csproj", "{76A0E1D8-7DCB-44C7-8125-14AEB94500E9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GenericHost", "GenericHost\GenericHost.csproj", "{51EA3B64-E00F-4DF1-9852-AC88E10E02F6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,6 +29,10 @@ Global
 		{76A0E1D8-7DCB-44C7-8125-14AEB94500E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{76A0E1D8-7DCB-44C7-8125-14AEB94500E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{76A0E1D8-7DCB-44C7-8125-14AEB94500E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{51EA3B64-E00F-4DF1-9852-AC88E10E02F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{51EA3B64-E00F-4DF1-9852-AC88E10E02F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{51EA3B64-E00F-4DF1-9852-AC88E10E02F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{51EA3B64-E00F-4DF1-9852-AC88E10E02F6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
